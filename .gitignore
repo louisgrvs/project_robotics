@@ -218,3 +218,27 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- ROS 2 (colcon) ---
+build/
+install/
+log/
+
+# --- Résultats d'expériences ---
+runs/          # journaux TensorBoard
+checkpoints/   # poids des modèles (*.zip SB3, *.pt)
+*.pt
+*.pth
+*.zip
+videos/
+*.mp4
+*.gif
+
+# --- Données volumineuses ---
+data/
+
+# --- Éditeurs et système ---
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
