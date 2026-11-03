@@ -1,6 +1,7 @@
 # project_robotics
 A robotics project with a little worlds model and some RL.
 
+```text
 Bibliography :
 Those are temporary and made by AI, I will check if those are true while I read them.
 Mobile robotic and simulation
@@ -45,3 +46,4 @@ Learning model, uncertainty and planification :
 • Alain et Bengio, « Understanding intermediate layers using linear classifier probes », 2016.
 • Roy et Vetterli, « The effective rank: A measure of effective dimensionality », 2007.
 • Tobin et al., « Domain randomization for transferring deep neural networks from simulation to the real world », 2017.
+```
