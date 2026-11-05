@@ -1,0 +1,27 @@
+<mujoco>
+  <option integrator="implicitfast"/> <!--Recommande par la documentation : je crois qu'on dit de faire le schema d'Euler mais rapide-->
+  <worldbody>
+    <body name="chassis" pos="0 0 0.05"> 
+      <freejoint/>
+      <geom type="box" size="0.15 0.1 0.03" mass="1"/>
+      <geom type="sphere" size="0.05" pos="-0.12 0 0" condim="1" priority="1" mass="0.05"/>
+      <body name="roue_g" pos="0.05 0.12 0">
+        <joint name="g" type="hinge" axis="0 1 0"/>
+        <geom type="cylinder" size="0.05 0.01" euler="90 0 0" friction="1 0.005 0.0001"/>
+      </body>
+      <body name="roue_d" pos="0.05 -0.12 0">
+        <joint name="d" type="hinge" axis="0 1 0"/>
+        <geom type="cylinder" size="0.05 0.01" euler="90 0 0" friction="1 0.005 0.0001"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <velocity joint="g" kv="1" ctrlrange="-10 10" forcerange="-0.2 0.2"/> 
+    <!--
+    actionneur velocity qui applique le couple tau = kv (ctrl - dot(q))
+    ctrlrange dis que la roue ne peut pas tourner trop vite, il borne data.ctrl
+    forcerange borne la puissance du moteur, il borne tau
+     -->
+    <velocity joint="d" kv="1" ctrlrange="-10 10" forcerange="-0.2 0.2"/> <!---->
+  </actuator>
+</mujoco>
