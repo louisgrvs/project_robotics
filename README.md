@@ -2,6 +2,78 @@
 A robotics project with a little worlds model and some RL.
 
 ```text
+project_robotics/
+├── README.md
+├── pyproject.toml                 Declares pai_core as an installable package (pip install -e .)
+├── .gitignore
+│
+├── assets/
+│   └── mjcf/                      MuJoCo models (XML files)
+│       ├── robot.xml              The robot alone, with all its characteristics
+│       └── arena.xml              The world: ground, obstacles, lights, options...
+│
+├── src/
+│   └── pai_core/                  Python library of the project
+│       ├── robot/                 Mathematical model of the robot
+│       │   ├── diff_drive.py      Forward and inverse kinematics
+│       │   └── odometry.py        Estimates the robot's position from the wheel encoders
+│       ├── sim/                   Interface between the simulator and everything else
+│       │   ├── sensors.py         All of the robot's sensors
+│       │   └── world.py           Obstacles and random goals, A*
+│       ├── perception/            From sensors to observation
+│       │   ├── features.py        Builds the observation vector
+│       │   └── occupancy_grid.py  Log-odds occupancy grid: a probabilistic map of the world built from the lidar
+│       ├── envs/                  Training environment
+│       │   └── nav_env.py         Gymnasium navigation environment
+│       ├── control/               Classical navigation, without any learning
+│       │   ├── go_to_goal.py      Reaches a goal when there are no obstacles
+│       │   └── dwa.py             Dynamic Window Approach, handles obstacles
+│       ├── rl/                    Reinforcement learning
+│       │   ├── train_ppo.py       PPO training (Stable-Baselines3)
+│       │   └── curriculum.py      A "school" for training: we start with very easy scenes and make them harder and harder
+│       ├── world_model/           World models (naive and latent)
+│       │   ├── dataset.py         Reorganizes the data produced by collect_data.py to train the world model
+│       │   ├── naive.py           The simplest possible world model
+│       │   ├── encoders.py        Maps observations into a latent space
+│       │   ├── predictor.py       Advances the latent state by one step
+│       │   ├── losses.py          Loss functions that prevent the training from collapsing (BYOL-style mechanism)
+│       │   ├── train_wm.py        Training of the world model
+│       │   └── probes.py          Tools to understand how the latent space is organized
+│       ├── planning/              Uses the world model to plan actions
+│       │   ├── mppi.py            Generic MPPI planner, to choose which path to follow
+│       │   └── costs.py           Cost functions
+│       └── eval/                  Determines which method works best
+│           ├── scenarios.py       200 fixed scenes to test PPO, MPPI and DWA
+│           ├── metrics.py         Evaluation metrics for each method, to tell which one is actually the best
+│           ├── benchmark.py       Uses scenarios.py and metrics.py to produce all the results
+│           └── wm_metrics.py      World model error, if I have time
+│
+├── scripts/                       Experiments for the project
+│   ├── sandbox_free_fall.py       Free fall, with a comparison between Euler and RK4
+│   ├── validate_kinematics.py     Simulated robot compared to the theoretical motion
+│   ├── exp_e1_odometry.py         Experiment E1: how well does odometry work?
+│   ├── eval_classic.py            First evaluation, before benchmark.py exists
+│   ├── collect_data.py            Data collection for training the world model
+│   └── make_figures.py            All figures and results
+│
+├── tests/                         pytest tests
+│   ├── test_kinematics.py         Checks diff_drive.py
+│   ├── test_reward.py             Checks that the reward function does what we actually want
+│   └── test_identity.py           Checks that the transition from Gymnasium to ROS actually works
+│
+├── ros2_ws/                       colcon workspace (ROS 2 Jazzy)
+│   └── src/
+│       ├── pai_ros/               ROS 2 package of the project
+│       └── pai_interfaces/        NavigateToGoal action (ament_cmake)
+│
+├── notebooks/                     Notebooks for quick tests and trying out ideas
+│
+└── docs/
+    ├── notes/                     Technical notes on the physics and the chosen parameters
+    ├── figures/                   Experiment figures
+    └── presentation/              Slides presenting the project
+```
+```text
 Bibliography :
 Those are temporary and made by AI, I will check if those are true while I read them.
 Mobile robotic and simulation
