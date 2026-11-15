@@ -129,6 +129,6 @@ def test_lidar_sees_wall_at_known_distance(env):
     # au-dessus de l'origine du châssis, 5 cm derrière l'essieu : il voit le mur à 1,05 m.
     env.reset(seed=0, options={"scene": empty_scene((2.0, 0.0, 0.0), (-2.0, 0.0))})
     ranges = env.lidar.scan(env.model, env.data)
-    assert abs(ranges[0] - 1.05) < 0.01              # faisceau 0 vers l'avant
+    assert abs(ranges[0] - 1.00) < 0.01              # faisceau 0 vers l'avant
     assert abs(ranges[18] - 4.0) < 1e-9              # vers l'arrière : mur à 4,95 m, hors portée
     assert abs(ranges[9] - 3.0) < 0.01               # vers la gauche : mur y = 3

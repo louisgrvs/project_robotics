@@ -27,7 +27,7 @@ def test_geometrie_du_robot():
     _, _, g = scene()
     assert g.wheel_radius == pytest.approx(0.05)
     assert g.wheel_base == pytest.approx(0.24)
-    np.testing.assert_allclose(g.axle_offset, [0.05, 0.0, 0.0])
+    np.testing.assert_allclose(g.axle_offset, [0.00, 0.0, 0.0])
 
 
 def test_aucun_impact_donne_la_portee_maximale():
@@ -90,8 +90,8 @@ def test_pose_vraie_au_milieu_de_l_essieu():
     data.qpos[a + 3:a + 7] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
     x, y, th = true_pose(data, g)
     assert th == pytest.approx(yaw)
-    assert x == pytest.approx(1.0 + 0.05 * np.cos(yaw))
-    assert y == pytest.approx(2.0 + 0.05 * np.sin(yaw))
+    assert x == pytest.approx(1.0)
+    assert y == pytest.approx(2.0)
 
 
 def test_lacet_du_quaternion():

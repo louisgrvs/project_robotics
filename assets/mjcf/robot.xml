@@ -10,7 +10,6 @@
       <geom name="caisse" type="box" size="0.15 0.1 0.03" pos="-0.05 0 0" mass="1"/>
       <geom name="roulette" type="sphere" size="0.05" pos="-0.17 0 0" condim="1" priority="1" mass="0.05"/>
       <!-- Lidar : 7 cm au-dessus de l'essieu, donc au-dessus de la caisse et des roues -->
-      <site name="lidar" pos="0 0 0.07" size="0.015" rgba="0.1 0.8 0.2 1"/>
       <body name="roue_g" pos="0 0.12 0">
         <joint name="g" type="hinge" axis="0 1 0"/>
         <geom type="cylinder" size="0.05 0.01" euler="90 0 0" friction="1 0.005 0.0001"/>
