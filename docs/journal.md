@@ -8,3 +8,8 @@ Création de sandbox_free_fall.py : enregistrement de la hauteur, comparaison en
 Dernière installation du setup et fixe de certains bug qu'il y avait
 Création du robot (avec un petit script de déplacement)
 Création de l'arena.xml qui regroupe le robot et le sol (pour l'instant très simple)
+
+09/11/2026 : 
+Bon comme j'ai pris bcp de retard, j'ai codé bcp avec Claude pour que le programme soit bon au temps voulu. Désormais on dispose d'un environnement viable, dans lequel le robot peux évoluer (et j'ai vérifié : ça compile). 
+
+Problème : je comprends rien au code (normal j'ai rien fait lol), donc je me donne aujourd'hui pour le relire et bien le comprendre. Je ferais au fur et à mesure de ma relecture de la lecture d'article sur lesquels tout ça est basé, et je vais effectuer des tests dans un notebooks (qu'on peut retrouver dans le dossier notebooks, il s'appelle 'draft.ipynb') pour vérifier que je comprends bien tout ce qu'il se passe.

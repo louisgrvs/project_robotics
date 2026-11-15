@@ -1,27 +1,31 @@
 <mujoco>
-  <option integrator="implicitfast"/> <!--Recommande par la documentation : je crois qu'on dit de faire le schema d'Euler mais rapide-->
+  <!-- implicitfast : les forces qui dépendent de la vitesse (ici le terme kv de
+       l'actionneur) sont intégrées implicitement, le reste comme Euler. -->
+  <option integrator="implicitfast"/>
+
   <worldbody>
-    <body name="chassis" pos="0 0 0.05"> 
+    <!-- Origine du corps = milieu de l'essieu = base_link -->
+    <body name="chassis" pos="0 0 0.05">
       <freejoint/>
-      <geom type="box" size="0.15 0.1 0.03" mass="1"/>
-      <geom type="sphere" size="0.05" pos="-0.12 0 0" condim="1" priority="1" mass="0.05"/>
-      <body name="roue_g" pos="0.05 0.12 0">
+      <geom name="caisse" type="box" size="0.15 0.1 0.03" pos="-0.05 0 0" mass="1"/>
+      <geom name="roulette" type="sphere" size="0.05" pos="-0.17 0 0" condim="1" priority="1" mass="0.05"/>
+      <!-- Lidar : 7 cm au-dessus de l'essieu, donc au-dessus de la caisse et des roues -->
+      <site name="lidar" pos="0 0 0.07" size="0.015" rgba="0.1 0.8 0.2 1"/>
+      <body name="roue_g" pos="0 0.12 0">
         <joint name="g" type="hinge" axis="0 1 0"/>
         <geom type="cylinder" size="0.05 0.01" euler="90 0 0" friction="1 0.005 0.0001"/>
       </body>
-      <body name="roue_d" pos="0.05 -0.12 0">
+      <body name="roue_d" pos="0 -0.12 0">
         <joint name="d" type="hinge" axis="0 1 0"/>
         <geom type="cylinder" size="0.05 0.01" euler="90 0 0" friction="1 0.005 0.0001"/>
       </body>
     </body>
   </worldbody>
+
   <actuator>
-    <velocity joint="g" kv="1" ctrlrange="-10 10" forcerange="-0.2 0.2"/> 
-    <!--
-    actionneur velocity qui applique le couple tau = kv (ctrl - dot(q))
-    ctrlrange dis que la roue ne peut pas tourner trop vite, il borne data.ctrl
-    forcerange borne la puissance du moteur, il borne tau
-     -->
-    <velocity joint="d" kv="1" ctrlrange="-10 10" forcerange="-0.2 0.2"/> <!---->
+    <!-- tau = kv·(ctrl - \dot{q}) ; ctrlrange borne la consigne de vitesse (rad/s),
+         forcerange borne le couple du moteur (N·m) -->
+    <velocity name="moteur_g" joint="g" kv="1" ctrlrange="-10 10" forcerange="-0.2 0.2"/>
+    <velocity name="moteur_d" joint="d" kv="1" ctrlrange="-10 10" forcerange="-0.2 0.2"/>
   </actuator>
 </mujoco>

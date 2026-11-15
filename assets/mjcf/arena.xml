@@ -10,6 +10,6 @@
 
   <worldbody>
     <light pos="0 0 1" mode="trackcom"/>
-    <geom name="floor" type="plane" pos="0 0 -.5" size="2 2 .1" material="grid" solimp=".99 .99 .01" solref=".001 1"/>
+    <geom name="floor" type="plane" pos="0 0 0" size="2 2 .1" material="grid" solimp=".99 .99 .01" solref=".001 1"/>
   </worldbody>
 </mujoco>
