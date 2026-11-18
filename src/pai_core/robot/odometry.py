@@ -24,11 +24,7 @@ Delta s·(1 - sinc(Delta theta /2)) approx Delta s·Delta theta ²/24 : elle est
 from __future__ import annotations
 
 import numpy as np
-
-
-def wrap_angle(a):
-    """Ramène un angle (ou un tableau d'angles) dans [-pi, pi)."""
-    return (np.asarray(a) + np.pi) % (2.0 * np.pi) - np.pi
+from pai_core.geometry.se2 import wrap_angle
 
 def midpoint_step(pose, ds_l: float, ds_r: float, wheel_base: float) -> np.ndarray:
     """Un pas d'odométrie par le schéma du point milieu. Pour comprendre : aller voir là-haut je trouve c'est bien expliqué"""
