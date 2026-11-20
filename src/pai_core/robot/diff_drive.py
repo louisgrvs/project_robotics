@@ -201,15 +201,15 @@ def saturate_wheels(omega_l: ArrayLike, omega_r: ArrayLike,
     return s * omega_l, s * omega_r
 
 
-#TODO : pas compris
 def saturate(v: ArrayLike, w: ArrayLike, params: DiffDriveParams,
              v_max: float | None = None,
              w_max: float | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Sature une commande (v, w) en préservant sa courbure k = w/v.
 
-    La commande est multipliée par un unique facteur s ∈ ]0, 1], le plus grand
+    En gros on utilise ça si jamais on a une roue qui va trop vite et qu'on veut suivre DWA.
+    La commande est multipliée par un unique facteur s in ]0, 1], le plus grand
     qui respecte à la fois la limite des roues et, si elles sont fournies, les
-    bornes |v| ≤ v_max et |w| ≤ w_max. Le robot suit donc le même arc de
+    bornes |v| <= v_max et |w| <= w_max. Le robot suit donc le même arc de
     cercle, simplement moins vite. Conséquence voulue : une forte demande de
     rotation ralentit aussi l'avance, au lieu de sortir de la trajectoire.
     """

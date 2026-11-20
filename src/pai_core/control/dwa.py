@@ -17,7 +17,7 @@ Notations des dimensions : M candidats, n instants simulés, N points lidar.
 from dataclasses import dataclass, field
 
 import numpy as np
-
+from pai_core.perception.features import ObsConfig, split_obs    
 from pai_core.perception.features import split_obs
 from pai_core.robot.diff_drive import DiffDriveParams
 
@@ -51,6 +51,7 @@ class DWAParams:
     w_clearance: float = 1.0
     w_velocity: float = 0.5
     d_max: float = 1.0           # au-delà, un dégagement plus grand ne rapporte plus rien (m)
+    w_limit: float = 2.0
 
     # repli quand aucun candidat n'est admissible
     w_fallback: float = 1.0      # rotation sur place (rad/s)
@@ -99,7 +100,7 @@ def lidar_to_points(distances: np.ndarray, angles: np.ndarray,
 def dynamic_window(v_c: float, w_c: float, p: DWAParams) -> np.ndarray:
     """Candidats (v, w) atteignables en p.dt depuis la vitesse actuelle, (M, 2).
 
-    Fenêtre : rectangle [v_c ± acc_v·dt] times [w_c ± acc_w·dt], discrétisé en
+    Fenêtre : rectangle [v_c pm acc_v·dt] times [w_c pm acc_w·dt], discrétisé en
     une grille n_v times n_w, avec v >= 0 (pas de marche arrière). On ne garde
     que les points du losange des roues : |v| / v_max + |w| / w_max <= 1.
     n_w impair : la commande actuelle w_c fait partie des candidats.
@@ -108,8 +109,9 @@ def dynamic_window(v_c: float, w_c: float, p: DWAParams) -> np.ndarray:
     # bornes du rectangle, rognées par les limites absolues pour ne pas gaspiller de points
     v_lo = max(0.0, v_c - p.acc_v * p.dt)
     v_hi = min(p.v_max, v_c + p.acc_v * p.dt)
-    w_lo = max(-p.w_max, w_c - p.acc_w * p.dt)
-    w_hi = min(p.w_max, w_c + p.acc_w * p.dt)
+    w_lim = min(p.w_max, p.w_limit)
+    w_lo = max(-w_lim, w_c - p.acc_w * p.dt)
+    w_hi = min(w_lim, w_c + p.acc_w * p.dt)
 
     vs = np.linspace(v_lo, v_hi, p.n_v)
     ws = np.linspace(w_lo, w_hi, p.n_w)
@@ -133,7 +135,7 @@ def rollout_unicycle(cand: np.ndarray, horizon: float, dt_sim: float) -> np.ndar
     Si |w| est presque nul : x = v·t, y = v·w·t²/2 (limite de la formule).
     Réutilisée telle quelle par MPPI au jour 18.
     """
-    t = np.arange(1, int(round(horizon / dt)) + 1) * dt             # (n,)
+    t = np.arange(1, int(round(horizon / dt_sim)) + 1) * dt_sim             # (n,)
     v, w = cand[:, 0:1], cand[:, 1:2]                               # (M, 1)
     th = w * t                                                      # (M, n)
     droit = np.abs(w) < 1e-6
@@ -177,7 +179,9 @@ def admissible(cand: np.ndarray, t_contact: np.ndarray, p: DWAParams) -> np.ndar
     donnerait 0·inf = nan, et une comparaison avec nan vaut toujours False.
     """
     v = cand[:, 0]
-    s = np.where(np.isinf(t_contact), np.inf, v * t_contact)
+    s = np.full_like(v, np.inf)                       # pas de contact prévu : distance infinie
+    fini = np.isfinite(t_contact)
+    s[fini] = v[fini] * t_contact[fini]               # distance avant contact, seulement si contact il y a
     return v <= np.sqrt(2 * p.dec_v * s)
 
 
@@ -195,12 +199,12 @@ def cost(cand: np.ndarray, traj: np.ndarray, d_min: np.ndarray,
     goal_xy : position du but dans base_link, (2,).
     """
     x, y, th = traj[:, -1, 0], traj[:, -1, 1], traj[:, -1, 2]       # fin de chaque arc
-    psi = np.arctan2(but_xy[1] - y, but_xy[0] - x)                  # direction du but vue de là
+    psi = np.arctan2(goal_xy[1] - y, goal_xy[0] - x)                  # direction du but vue de là
     ecart = np.abs(np.angle(np.exp(1j * (psi - th))))               # écart d'angle dans [0, π]
     c_cap = ecart / np.pi
     c_deg = 1 - np.minimum(d_min, p.d_max) / p.d_max
     c_vit = 1 - cand[:, 0] / p.v_max
-    return p.w_h * c_cap + p.w_c * c_deg + p.w_v * c_vit
+    return p.w_heading * c_cap + p.w_clearance * c_deg + p.w_velocity * c_vit 
 
 
 # ---------------------------------------------------------------- décideur
@@ -243,5 +247,6 @@ class DWA:
         return self._to_action(v, w)
 
     def _to_action(self, v: float, w: float) -> np.ndarray:
-        """(v, w) physiques -> format d'action de nav_env. À adapter (voir ci-dessous)."""
-        return np.array([v, w], dtype=np.float32)                           # (v, omega)
+        """(v, w) physiques -> action normalisée dans [-1, 1]², comme PPO."""
+        cfg = ObsConfig()
+        return np.array([v / cfg.v_max, w / cfg.w_max], dtype=np.float32)

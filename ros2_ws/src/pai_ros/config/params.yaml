@@ -1,0 +1,52 @@
+# Paramètres de tous les noeuds de pai_ros.
+#
+# Le nom de chaque section doit être EXACTEMENT le nom du noeud (name= dans
+# nav.launch.py), sinon ROS ignore la section sans rien dire.
+#
+# use_sim_time n'est pas ici : nav.launch.py le fixe noeud par noeud
+# (vrai partout, sauf pour sim_bridge qui publie /clock).
+#
+# Chaque résultat chiffré doit pouvoir être relié à ce fichier : le
+# committer avec les résultats, et noter dans le journal tout changement.
+
+sim_bridge:
+  ros__parameters:
+    seed: 0                  # écrasée par l'argument de lancement seed:=
+    n_obstacles: -1          # -1 : nombre tiré comme dans NavEnv
+    rate: 50.0               # Hz, cycles de simulation publiés
+    scan_every: 5            # un scan tous les 5 cycles -> 10 Hz, la période de décision
+    cmd_timeout: 0.5         # s, chien de garde : roues à l'arrêt sans /wheel_cmd récent
+    lidar_noise_std: 0.0     # m
+    lidar_dropout: 0.0       # probabilité qu'un faisceau soit perdu
+    viewer: true             # écrasé par l'argument de lancement viewer:=
+
+# perception_node : ajouter ici une section quand ton noeud du jour 8 aura des
+# paramètres. Pas de section vide : l'analyseur YAML de ROS peut la refuser.
+# perception_node:
+#   ros__parameters:
+#     ...
+
+decision_node:
+  ros__parameters:
+    rate: 10.0               # Hz, comme NavEnv
+    goal_tolerance: 0.25     # m, comme NavEnv
+    base_frame: base_link
+    dwa:
+      w_heading: 1.0
+      w_clearance: 1.0
+      w_velocity: 0.5
+      horizon: 1.5           # s
+
+control_node:
+  ros__parameters:
+    v_max: 0.0               # 0 : seule la limite des roues s'applique
+    w_max: 0.0
+    safety:
+      enabled: true          # écrasé par l'argument de lancement safety:=
+      robot_radius: 0.24     # m, même valeur que DWAParams.robot_radius
+      lidar_offset_x: 0.0    # m, à vérifier dans le MJCF
+      corridor_margin: 0.05  # m
+      dec: 1.0               # m/s², décélération de freinage supposée
+      latency: 0.15          # s, scan + décision + commande
+      stop_margin: 0.05      # m
+      scan_timeout: 0.5      # s

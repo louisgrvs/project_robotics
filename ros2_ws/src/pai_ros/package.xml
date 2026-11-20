@@ -3,18 +3,23 @@
 <package format="3">
   <name>pai_ros</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Couche ROS 2 du projet Physical AI : pont MuJoCo, perception, décision, commande</description>
   <maintainer email="louis.gervais@ens-lyon.fr">louisgrvs</maintainer>
   <license>MIT</license>
 
+  <!-- Ce que les noeuds importent à l'exécution -->
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>tf2_tools</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+
+  <!-- Lancement et visualisation -->
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <exec_depend>rviz2</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
