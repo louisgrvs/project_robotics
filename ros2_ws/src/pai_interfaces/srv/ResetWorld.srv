@@ -1,0 +1,12 @@
+# Requête : quelle scène tirer
+int32 seed            # graine de la scène ; -1 : continuer le tirage en cours
+int32 n_obstacles     # nombre d'obstacles ; -1 : tiré comme dans NavEnv
+---
+# Réponse : la scène installée
+bool success
+string message
+float64 start_x       # pose de départ du robot dans map (m, rad)
+float64 start_y
+float64 start_yaw
+float64 goal_x        # but de la scène dans map (m), à envoyer à /navigate_to_goal
+float64 goal_y

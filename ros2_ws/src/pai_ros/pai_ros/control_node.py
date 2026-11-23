@@ -15,12 +15,19 @@ Sorties  : /wheel_cmd             std_msgs/Float64MultiArray  [omega_g, omega_d]
 Le noeud ne contient que la plomberie ROS. Toute la logique est dans
 pai_core (diff_drive, control/safety) et se teste sans ROS.
 
+Latence (jour 10) : decision_node horodate chaque /cmd_vel avec l'instant du
+scan qui l'a produit. À la réception, latence = maintenant − horodatage, en
+temps simulé. Chaque mesure est écrite dans un fichier CSV (paramètre
+latency_log) ; scripts/plot_latency.py en trace l'histogramme.
+
 Le filtre lit /scan et non /scan_proc : la sûreté ne doit dépendre ni de la
 latence ni d'un bogue éventuel de la perception.
 
 Rappel : une fonction de rappel (on_scan, on_cmd_vel) ne renvoie rien, rclpy
 jetterait la valeur. Elle communique en rangeant dans self ou en publiant.
 """
+from pathlib import Path
+
 import numpy as np
 import rclpy
 from geometry_msgs.msg import TwistStamped
@@ -62,6 +69,10 @@ class ControlNode(Node):
             scan_timeout=float(self.declare_parameter("safety.scan_timeout", d.scan_timeout).value),
         )
 
+        # Fichier des latences ("" : pas d'enregistrement). Chemin relatif : par
+        # rapport au dossier d'où l'on a lancé ros2 launch.
+        latency_log = str(self.declare_parameter("latency_log", "latence.csv").value)
+
         # ---------------------------------------------------------- état
         self.points: np.ndarray | None = None   # dernier scan, en points base_link (N, 2)
         self.scan_stamp: Time | None = None     # horodatage de ce scan (temps simulé)
@@ -69,6 +80,14 @@ class ControlNode(Node):
         self.n_interventions = 0                # nombre d'interventions (fronts montants)
         self.n_cycles_filtered = 0              # nombre de commandes modifiées par le filtre
         self.n_stale = 0                        # commandes bloquées faute de scan récent
+        self.latencies_ms: list[float] = []     # latences scan -> commande (ms, temps simulé)
+        self.latency_file = None
+        if latency_log:
+            path = Path(latency_log).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.latency_file = open(path, "w", encoding="utf-8")
+            self.latency_file.write("t_sim_s,latence_ms,v_cmd\n")
+            self.get_logger().info(f"latences enregistrées dans {path.resolve()}")
 
         # ---------------------------------------------------------- ROS
         self.pub_wheels = self.create_publisher(Float64MultiArray, "/wheel_cmd", 10)
@@ -99,6 +118,9 @@ class ControlNode(Node):
 
         Chaque étape récupère le résultat de la précédente par une affectation.
         """
+        # 0. latence : maintenant − instant du scan qui a produit cette commande
+        self._record_latency(msg)
+
         # 1. lecture de la commande demandée
         v = msg.twist.linear.x
         w = msg.twist.angular.z
@@ -143,6 +165,24 @@ class ControlNode(Node):
 
     # -------------------------------------------------------------- outils
 
+    def _record_latency(self, msg: TwistStamped) -> None:
+        """Mesure et enregistre la latence scan -> commande de ce /cmd_vel.
+
+        Les deux instants sont en temps simulé, qui n'avance que par cycles de
+        sim_bridge (20 ms) : les valeurs tombent donc sur des multiples de 20 ms.
+        Un horodatage nul (aucun scan reçu par decision_node) est ignoré.
+        """
+        stamp = Time.from_msg(msg.header.stamp)
+        if stamp.nanoseconds == 0:
+            return
+        now = self.get_clock().now()
+        lat_ms = (now - stamp).nanoseconds * 1e-6
+        self.latencies_ms.append(lat_ms)
+        if self.latency_file is not None:
+            self.latency_file.write(f"{now.nanoseconds * 1e-9:.3f},{lat_ms:.3f},{msg.twist.linear.x:.4f}\n")
+            if len(self.latencies_ms) % 50 == 0:      # vider le tampon de temps en temps
+                self.latency_file.flush()
+
     def _scan_is_fresh(self) -> bool:
         """Vrai si un scan existe et date de moins de scan_timeout.
 
@@ -174,6 +214,13 @@ class ControlNode(Node):
             f"bilan : {self.n_interventions} interventions, "
             f"{self.n_cycles_filtered} cycles filtrés, {self.n_stale} commandes sans scan"
         )
+        if self.latencies_ms:
+            lat = np.asarray(self.latencies_ms)
+            self.get_logger().info(
+                f"latence scan -> commande sur {lat.size} commandes : médiane {np.median(lat):.0f} ms, "
+                f"95 % sous {np.percentile(lat, 95):.0f} ms, max {lat.max():.0f} ms")
+        if self.latency_file is not None:
+            self.latency_file.close()
         super().destroy_node()
 
 

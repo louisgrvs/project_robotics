@@ -33,8 +33,21 @@ Topics publiés
     /scan          sensor_msgs/LaserScan       36 faisceaux             (laser_link)
     /tf            map -> odom, odom -> base_link
     /tf_static     base_link -> laser_link
+    /collision     std_msgs/Bool               vrai pendant un contact robot-obstacle (jour 10)
 Topic reçu
     /wheel_cmd     std_msgs/Float64MultiArray  [ω_gauche, ω_droite] en rad/s
+Service (jour 10)
+    /reset_world   pai_interfaces/srv/ResetWorld   nouvelle scène, sans relancer les nœuds
+
+Remise à zéro et temps simulé
+    mj_resetData remet data.time à 0. Si on le laissait faire, /clock
+    reculerait, et TF comme les minuteurs des autres nœuds verraient le temps
+    revenir en arrière (TF jette alors ses données). reset_scene conserve donc
+    le temps : il continue d'avancer à travers la remise à zéro.
+
+Les conversions vers les conventions ROS (inf pour « pas de retour »,
+map -> odom, vitesses de l'odométrie) sont dans pai_core/ros_conversions.py :
+le test d'identité appelle exactement les mêmes fonctions.
 
 Sûreté : sans commande pendant cmd_timeout secondes de temps simulé, les
 roues reçoivent une consigne nulle.
@@ -54,12 +67,15 @@ from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Bool, Float64MultiArray
 from tf2_ros import TransformBroadcaster
 from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
+from pai_interfaces.srv import ResetWorld
+
 from pai_core.envs.nav_env import NavEnvConfig
-from pai_core.geometry.se2 import between, compose, inverse, wrap_angle
+from pai_core.geometry.se2 import between
+from pai_core.ros_conversions import map_to_odom, ranges_to_msg, velocity_from_poses
 from pai_core.robot.odometry import WheelOdometry
 from pai_core.sim.sensors import Lidar, LidarConfig, WheelEncoders
 from pai_core.sim.world import World
@@ -94,23 +110,17 @@ class SimBridge(Node):
         if self.get_parameter("use_sim_time").value:
             raise RuntimeError("sim_bridge publie /clock : lance-le avec use_sim_time:=false")
 
-        # ------------------------------------------------- monde : comme NavEnv.reset
+        # ------------------------------------------------- monde
         # Même configuration que l'environnement Gymnasium : mêmes formes d'obstacles,
         # même portée du lidar, même nombre de pas de stabilisation.
-        cfg = NavEnvConfig()
+        self.cfg = NavEnvConfig()
+        cfg = self.cfg
         self.world = World(cfg.world)
         self.model, self.data = self.world.model, self.world.data
         m, d = self.model, self.data
-
-        rng = np.random.default_rng(seed)
-        if n_obstacles < 0:
-            lo, hi = cfg.n_obstacles
-            n_obstacles = int(rng.integers(lo, hi + 1))
-        self.scene = self.world.sample_scene(rng, n_obstacles)
-        self.world.apply(self.scene)
-        d.ctrl[:] = 0.0
-        for _ in range(cfg.settle_steps):          # laisse les contacts roues-sol s'établir
-            mujoco.mj_step(m, d)
+        self.seed = seed
+        self.n_obstacles_param = n_obstacles        # -1 : tiré comme dans NavEnv
+        self.rng = np.random.default_rng(seed)     # tirage des scènes successives
 
         # ------------------------------------------------------------ cadences
         dt = m.opt.timestep
@@ -128,8 +138,12 @@ class SimBridge(Node):
         self.odom = WheelOdometry(geom.wheel_radius,
                                   geom.wheel_radius * (1.0 + radius_err),
                                   geom.wheel_base * (1.0 + base_err))
-        self.odom.reset(wheel_angles=self.encoders.read(d))   # odom part de (0, 0, 0)
-        self.prev_odom_pose = self.odom.pose.copy()
+
+        # Première scène (même code que /reset_world)
+        self.map_odom0 = None      # première map -> odom (= pose de départ), pour mesurer la dérive
+        self.map_odom = None       # dernière map -> odom publiée
+        self.last_cmd_time = -math.inf
+        self.reset_scene(self.n_obstacles_param)
 
         # ------------------------------------------------------------------ ROS
         self.pub_clock = self.create_publisher(Clock, "/clock", 10)
@@ -138,24 +152,24 @@ class SimBridge(Node):
         # Capteur : « best effort », on préfère perdre un scan que le recevoir en retard.
         # Attention : un abonné « reliable » (réglage par défaut de RViz) ne reçoit rien.
         self.pub_scan = self.create_publisher(LaserScan, "/scan", qos_profile_sensor_data)
+        self.pub_collision = self.create_publisher(Bool, "/collision", 10)
         self.create_subscription(Float64MultiArray, "/wheel_cmd", self.on_wheel_cmd, 10)
+        self.create_service(ResetWorld, "/reset_world", self.on_reset_world)
 
         # Repères : /tf pour ce qui bouge, /tf_static (publié une fois, conservé
         # pour les abonnés qui arrivent plus tard) pour ce qui est fixé au robot.
         self.tf_broadcaster = TransformBroadcaster(self)
         self.tf_static_broadcaster = StaticTransformBroadcaster(self)
         self.publish_static_tf(self.sim_stamp())
-        self.map_odom0 = None      # première map -> odom (= pose de départ), pour mesurer la dérive
-        self.map_odom = None       # dernière map -> odom publiée
 
-        # Exécuteur mono-fil (rclpy.spin) : on_wheel_cmd et step ne s'exécutent
-        # jamais en même temps, donc aucun verrou n'est nécessaire sur self.data.
+        # Exécuteur mono-fil (rclpy.spin) : on_wheel_cmd, on_reset_world et step ne
+        # s'exécutent jamais en même temps, donc aucun verrou n'est nécessaire sur
+        # self.data (une remise à zéro ne peut pas tomber au milieu d'un pas).
         self.timer = self.create_timer(1.0 / self.rate, self.step)
 
         self.viewer = mujoco.viewer.launch_passive(m, d) if use_viewer else None
 
         self.cycle = 0
-        self.last_cmd_time = -math.inf
         self.rtf_wall0, self.rtf_sim0 = time.perf_counter(), d.time
         self.cb_max = 0.0
 
@@ -164,6 +178,52 @@ class SimBridge(Node):
             self.get_logger().info(f"odométrie faussée : rayon droit {radius_err:+.2%}, "
                                    f"entraxe {base_err:+.2%}, encodeurs "
                                    f"{encoder_ticks if encoder_ticks > 0 else 'parfaits'}")
+
+    # ------------------------------------------------------------------ scène
+    def reset_scene(self, n_obstacles: int) -> None:
+        """Tire et installe une nouvelle scène, comme NavEnv.reset.
+
+        Appelée au démarrage et par /reset_world. Le temps simulé est conservé
+        (voir l'en-tête) ; l'odométrie repart de (0, 0, 0), donc map -> odom
+        repart de la pose de départ.
+        """
+        cfg, m, d = self.cfg, self.model, self.data
+        if n_obstacles < 0:
+            lo, hi = cfg.n_obstacles
+            n_obstacles = int(self.rng.integers(lo, hi + 1))
+
+        t_before = d.time
+        self.scene = self.world.sample_scene(self.rng, n_obstacles)
+        self.world.apply(self.scene)               # mj_resetData : data.time repasse à 0
+        d.ctrl[:] = 0.0
+        for _ in range(cfg.settle_steps):          # laisse les contacts roues-sol s'établir
+            mujoco.mj_step(m, d)
+        d.time = t_before + cfg.settle_steps * m.opt.timestep   # le temps ne recule jamais
+
+        self.odom.reset(wheel_angles=self.encoders.read(d))   # odom part de (0, 0, 0)
+        self.prev_odom_pose = self.odom.pose.copy()
+        self.map_odom0 = None                      # la dérive se mesure depuis ce départ
+        self.last_cmd_time = -math.inf             # pas de commande héritée de l'ancienne scène
+
+    def on_reset_world(self, request, response):
+        """Service /reset_world : nouvelle scène, sans relancer les nœuds.
+
+        seed >= 0 : la scène est celle de cette graine (reproductible).
+        seed < 0  : on continue le tirage en cours (scène suivante).
+        """
+        if request.seed >= 0:
+            self.rng = np.random.default_rng(request.seed)
+            self.seed = int(request.seed)
+        n = request.n_obstacles if request.n_obstacles >= 0 else self.n_obstacles_param
+        self.reset_scene(int(n))
+        self.log_scene(self.seed)
+
+        s = self.scene
+        response.success = True
+        response.message = f"{len(s.obstacles)} obstacles, but en ({s.goal[0]:.2f}, {s.goal[1]:.2f})"
+        response.start_x, response.start_y, response.start_yaw = (float(c) for c in s.start)
+        response.goal_x, response.goal_y = float(s.goal[0]), float(s.goal[1])
+        return response
 
     # ------------------------------------------------------------------ commande
     def on_wheel_cmd(self, msg):
@@ -187,7 +247,9 @@ class SimBridge(Node):
             mujoco.mj_step(self.model, d)
         self.cycle += 1
 
-        if self.world.in_collision():
+        contact = self.world.in_collision()
+        self.pub_collision.publish(Bool(data=contact))
+        if contact:
             self.get_logger().warn("collision", throttle_duration_sec=1.0)
 
         # Tous les messages d'un cycle portent le même horodatage : le temps simulé.
@@ -218,12 +280,8 @@ class SimBridge(Node):
         """Publie /odom et renvoie la pose d'odométrie T_odom_base."""
         x, y, th = self.odom.update(self.encoders.read(self.data))
 
-        # Vitesses déduites de deux poses successives, en inversant le schéma du
-        # point milieu : dθ = θ1 − θ0 et Δs = projection du déplacement sur le cap moyen.
-        x0, y0, th0 = self.prev_odom_pose
-        dth = float(wrap_angle(th - th0))
-        th_mid = th0 + dth / 2.0
-        ds = (x - x0) * math.cos(th_mid) + (y - y0) * math.sin(th_mid)
+        # Vitesses déduites de deux poses successives (schéma du point milieu inversé)
+        v, w = velocity_from_poses(self.prev_odom_pose, (x, y, th), self.cycle_dt)
         self.prev_odom_pose = np.array([x, y, th])
 
         msg = Odometry()
@@ -233,8 +291,8 @@ class SimBridge(Node):
         msg.pose.pose.position.x = float(x)
         msg.pose.pose.position.y = float(y)
         set_yaw(msg.pose.pose.orientation, float(th))
-        msg.twist.twist.linear.x = ds / self.cycle_dt     # vitesses exprimées dans base_link
-        msg.twist.twist.angular.z = dth / self.cycle_dt
+        msg.twist.twist.linear.x = v                      # vitesses exprimées dans base_link
+        msg.twist.twist.angular.z = w
         self.pub_odom.publish(msg)
         return np.array([x, y, th])
 
@@ -256,14 +314,11 @@ class SimBridge(Node):
         return np.array([x, y, yaw])
 
     def publish_scan(self, stamp):
-        ranges = self.lidar.scan(self.model, self.data).astype(np.float64)
         max_range = float(self.lidar.cfg.max_range)
         # REP 117 : « aucun retour » s'écrit +inf, pas range_max. Sinon RViz et la
         # grille d'occupation prendraient ces faisceaux pour des impacts à 4 m
-        # (cercle fantôme). sensors.py met range_max pour « pas d'impact » et
-        # pour les faisceaux perdus : les deux deviennent inf ici.
-        # Pour features.py, rien ne change : clip(inf / portée, 0, 1) = 1.
-        ranges[ranges >= max_range] = np.inf
+        # (cercle fantôme). Pour features.py, rien ne change : inf redevient 1.
+        ranges = ranges_to_msg(self.lidar.scan(self.model, self.data), max_range)
 
         n = len(ranges)
         msg = LaserScan()
@@ -276,7 +331,7 @@ class SimBridge(Node):
         msg.scan_time = self.scan_every * self.cycle_dt
         msg.range_min = 0.0
         msg.range_max = max_range
-        msg.ranges = ranges.astype(np.float32).tolist()
+        msg.ranges = ranges
         self.pub_scan.publish(msg)
 
     # ------------------------------------------------------------------ repères
@@ -311,7 +366,7 @@ class SimBridge(Node):
 
     def publish_tf(self, stamp, pose_gt, pose_odom):
         """odom -> base_link (odométrie) et map -> odom (correction de la dérive)."""
-        map_odom = compose(pose_gt, inverse(pose_odom))       # T_map_odom = T_map_base ∘ T_odom_base⁻¹
+        map_odom = map_to_odom(pose_gt, pose_odom)           # T_map_odom = T_map_base ∘ T_odom_base⁻¹
         if self.map_odom0 is None:
             self.map_odom0 = map_odom.copy()                  # doit valoir la pose de départ
             self.get_logger().info(f"map -> odom initiale : x={map_odom[0]:.3f} y={map_odom[1]:.3f} "

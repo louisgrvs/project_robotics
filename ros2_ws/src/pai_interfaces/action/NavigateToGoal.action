@@ -1,0 +1,10 @@
+# But : où aller
+geometry_msgs/PoseStamped goal
+---
+# Résultat : envoyé une fois, à la fin
+bool success
+float32 duration        # s, temps simulé
+uint32 collisions
+---
+# Retour : envoyé régulièrement pendant la tâche
+float32 distance_remaining   # m

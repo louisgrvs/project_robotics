@@ -1,6 +1,6 @@
 """Environnement Gymnasium de navigation vers un but.
 
-  Action      : (a_v, a_ω) dans [−1, 1]², converties en v = a_v·v_max et
+  Action      : (a_v, a_ω) dans [-1, 1]², converties en v = a_v·v_max et
                 ω = a_ω·ω_max, puis en vitesses de roues (cinématique inverse
                 et saturation qui conserve la courbure).
   Observation : voir pai_core/perception/features.py (43 composantes).
@@ -91,8 +91,11 @@ class NavEnv(gym.Env):
         if "scene" in options:            # scène imposée : tests, banc d'essai (jour 12)
             self.scene = options["scene"]
         else:                             # densité imposée (curriculum, jour 11) ou tirée
-            lo, hi = self.cfg.n_obstacles
-            n = options.get("n_obstacles", int(self.np_random.integers(lo, hi + 1)))
+            if "n_obstacles" in options:
+                n = int(options["n_obstacles"])
+            else:
+                lo, hi = self.cfg.n_obstacles
+                n = int(self.np_random.integers(lo, hi + 1))
             self.scene = self.world.sample_scene(self.np_random, n)
 
         self.world.apply(self.scene)
@@ -108,7 +111,7 @@ class NavEnv(gym.Env):
     def step(self, action):
         a = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
         v, w = float(a[0]) * self.cfg.obs.v_max, float(a[1]) * self.cfg.obs.w_max
-        # saturate travaille sur (v, ω) : il réduit les deux du même facteur si
+        # saturate travaille sur (v, omega) : il réduit les deux du même facteur si
         # une roue dépasse sa vitesse maximale (la courbure est conservée).
         # inverse donne ensuite les vitesses des roues (gauche, droite).
         v, w = saturate(v, w, self.cfg.robot)

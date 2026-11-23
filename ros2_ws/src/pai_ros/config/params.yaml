@@ -31,6 +31,10 @@ decision_node:
     rate: 10.0               # Hz, comme NavEnv
     goal_tolerance: 0.25     # m, comme NavEnv
     base_frame: base_link
+    max_duration: 30.0       # s, abandon d'une action (comme max_steps = 300 de NavEnv)
+    decision_mode: dwa       # dwa ou ppo
+    model_path: ""           # pour ppo : chemin du .zip, par ex. ~/project_robotics/checkpoints/controle_sans_obstacle/best/best_model.zip
+    velocity_source: ground_truth   # ground_truth (comme NavEnv) ou odom (comme un vrai robot)
     dwa:
       w_heading: 1.0
       w_clearance: 1.0
@@ -41,6 +45,7 @@ control_node:
   ros__parameters:
     v_max: 0.0               # 0 : seule la limite des roues s'applique
     w_max: 0.0
+    latency_log: latence.csv # "" : pas d'enregistrement ; relatif au dossier de lancement
     safety:
       enabled: true          # écrasé par l'argument de lancement safety:=
       robot_radius: 0.24     # m, même valeur que DWAParams.robot_radius

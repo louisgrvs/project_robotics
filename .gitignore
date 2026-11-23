@@ -225,8 +225,12 @@ install/
 log/
 
 # --- Résultats d'expériences ---
-runs/          # journaux TensorBoard
-checkpoints/   # poids des modèles (*.zip SB3, *.pt)
+# journaux TensorBoard
+runs/
+# poids des modèles (*.zip SB3, *.pt)
+checkpoints/
+# mesures de latence de control_node
+latence.csv
 *.pt
 *.pth
 *.zip
@@ -243,3 +247,4 @@ data/
 .DS_Store
 Thumbs.db
 *:Zone.Identifier
+

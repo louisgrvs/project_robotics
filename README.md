@@ -13,8 +13,11 @@ Tested on Ubuntu 24.04 (WSL2) with Python 3.12. You can download the package and
 
 ```bash
 git clone https://github.com/louisgrvs/project_robotics.git
-cd project_robotics
+cd ~/project_robotics
 python3 -m venv .venv
+cd ~/project_robotics/ros2_ws
+source install/setup.bash
+cd ~/project_robotics
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
