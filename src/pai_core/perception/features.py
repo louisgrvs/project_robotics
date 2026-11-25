@@ -1,7 +1,7 @@
-"""Construction de l'observation : LA fonction unique, partagée par Gym et ROS.
+"""Construction de l'observation : la fonction unique, partagée par Gym et ROS.
 
 Elle ne prend que des grandeurs physiques (distances, pose, vitesses), jamais
-l'objet MuJoCo. Le nœud de perception ROS 2 l'appelle avec les messages
+l'objet MuJoCo. Le noeud de perception ROS 2 l'appelle avec les messages
 /scan et /odom ; l'environnement Gym l'appelle avec les valeurs lues dans
 MuJoCo. C'est ce qui rend possible le test d'identité du jour 10.
 
@@ -10,7 +10,7 @@ Disposition du vecteur (43 composantes, toutes de l'ordre de 1) :
     [0:36]   distances lidar / portée max              dans [0, 1]
     [36]     distance au but / distance de référence   dans [0, 1]
     [37:39]  cos, sin du cap du but (repère du robot)  dans [-1, 1]
-    [39:41]  v / v_max, ω / ω_max                      écrêtés à [-2, 2]
+    [39:41]  v / v_max, omega  / omega _max                      écrêtés à [-2, 2]
     [41:43]  action précédente                         dans [-1, 1]
 
 Le cap est codé par (cos, sin) et non par l'angle : l'angle saute de +π à −π
@@ -48,13 +48,13 @@ VEL_CLIP = 2.0
 @dataclass(frozen=True)
 class ObsConfig:
     range_max: float = 4.0        # portée du lidar (m)
-    goal_dist_max: float = 8.5    # ≈ diagonale de l'arène (m)
+    goal_dist_max: float = 8.5    # approx diagonale de l'arène (m)
     v_max: float = 0.5            # mêmes échelles que l'action
     w_max: float = 2.0
 
 
 def lidar_angles(n_beams: int = N_BEAMS) -> np.ndarray:
-    """Angle de chaque faisceau dans le repère du lidar, (n_beams,) : 2πk / n.
+    """Angle de chaque faisceau dans le repère du lidar, (n_beams,) : 2pik / n.
 
     Faisceau 0 vers l'avant, angles croissants vers la gauche.
     """
@@ -77,9 +77,9 @@ def observation_bounds() -> tuple[np.ndarray, np.ndarray]:
 
 
 def preprocess_ranges(ranges, cfg: ObsConfig = ObsConfig()) -> np.ndarray:
-    """N_BEAMS distances (m, inf = pas de retour) → N_BEAMS valeurs dans [0, 1], float32.
+    """N_BEAMS distances (m, inf = pas de retour) -> N_BEAMS valeurs dans [0, 1], float32.
 
-    C'est le SEUL endroit où le lidar est normalisé : build_observation et
+    C'est le seul endroit où le lidar est normalisé : build_observation et
     /scan_proc l'appellent tous les deux.
     inf et NaN sont remplacés par range_max AVANT la division : np.clip laisse
     passer NaN, et un seul NaN dans l'observation suffit à casser PPO.
@@ -94,7 +94,7 @@ def preprocess_ranges(ranges, cfg: ObsConfig = ObsConfig()) -> np.ndarray:
 def build_observation(
     ranges: np.ndarray,                       # N_BEAMS distances (m)
     pose: tuple[float, float, float],         # x, y, lacet (repère map)
-    velocity: tuple[float, float],            # v, ω (repère du robot)
+    velocity: tuple[float, float],            # v, omega  (repère du robot)
     goal: tuple[float, float],                # x, y du but (repère map)
     prev_action: np.ndarray,                  # action normalisée du pas précédent
     cfg: ObsConfig = ObsConfig(),
@@ -114,10 +114,10 @@ def split_obs(obs, cfg: ObsConfig = ObsConfig()) -> tuple:
     """Inverse de build_observation, en unités physiques.
 
     Renvoie (distances en m (N_BEAMS,), distance au but en m, cap du but en rad,
-    v en m/s, ω en rad/s). L'action précédente n'est pas renvoyée.
+    v en m/s, omega  en rad/s). L'action précédente n'est pas renvoyée.
 
-    L'inversion PERD de l'information : la distance au but est saturée à
-    goal_dist_max, les vitesses à ±VEL_CLIP fois leur échelle, les distances
+    L'inversion perd de l'information : la distance au but est saturée à
+    goal_dist_max, les vitesses à pm VEL_CLIP fois leur échelle, les distances
     lidar à range_max (un faisceau à range_max signifie « pas de retour »).
     """
     obs = np.asarray(obs, dtype=np.float64)

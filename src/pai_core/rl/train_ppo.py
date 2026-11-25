@@ -1,23 +1,32 @@
-"""Entraînement PPO sur NavEnv : version minimale (entraînement de contrôle).
+"""Entraînement PPO sur NavEnv : entraînement de contrôle (jour 10) et curriculum (jour 11).
 
-But : vérifier que la chaîne observation -> récompense -> apprentissage
+But du jour 10 : vérifier que la chaîne observation -> récompense -> apprentissage
 fonctionne, sur des scènes sans obstacle. Si la récompense moyenne ne monte pas
 ici, le problème vient de la récompense, des échelles ou du câblage, pas de la
 difficulté de la tâche.
+
+But du jour 11 : entraîner sur la tâche complète, en montant la difficulté par
+niveaux (pai_core/rl/curriculum.py).
 
     ┌──────────────┐   make_env(rang)   ┌───────────────────────┐
     │ TrainConfig  │ ─────────────────> │ NavEnv + Monitor (×N) │ ── VecEnv
     └──────────────┘                    └───────────────────────┘      │
            │                                                           ▼
-           │  hyperparamètres                       ┌──────────────────────────┐
-           └──────────────────────────────────────> │ PPO("MlpPolicy", VecEnv) │
+           │                                         ┌──────────────────────────┐
+           │                                         │ VecNormalize (récompense)│
+           │                                         └──────────────────────────┘
+           │  hyperparamètres                                          │
+           │                                                           ▼
+           │                                         ┌──────────────────────────┐
+           └───────────────────────────────────────> │ PPO("MlpPolicy", VecEnv) │
                                                      └──────────────────────────┘
-                                                        │ learn()       │ rappels
-                                                        ▼               ▼
-                                          runs/<nom>/ (TensorBoard)   checkpoints/<nom>/
+                                                        │ learn()       │ rappels : sauvegardes,
+                                                        ▼               ▼ évaluation, statistiques,
+                                          runs/<nom>/ (TensorBoard)   checkpoints/<nom>/   curriculum
 
 Utilisation, depuis la racine du dépôt :
     python -m pai_core.rl.train_ppo --name controle_sans_obstacle --steps 2_000_000
+    python -m pai_core.rl.train_ppo --name curriculum_s0 --curriculum --seed 0 --steps 2_000_000
     tensorboard --logdir runs
 
 Ce qu'on doit voir dans TensorBoard :
@@ -26,6 +35,9 @@ Ce qu'on doit voir dans TensorBoard :
     rollout/ep_len_mean     baisse (le robot arrive plus vite)
     eval/mean_reward        part d'environ -1 et s'approche de 40 (score de « vers le but »)
     train/approx_kl, train/clip_fraction : ni nuls ni énormes (voir le jour 12)
+    rollout/collision_rate, rollout/timeout_rate   (EpisodeStatsCallback)
+    reward/<terme>                                  (poids de chaque terme)
+    curriculum/level, curriculum/success_window     (CurriculumCallback)
 """
 from __future__ import annotations
 
@@ -42,11 +54,14 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 # Projet
 from pai_core.envs.nav_env import NavEnv, NavEnvConfig
+from pai_core.envs.reward import RewardConfig
 from pai_core.perception.features import SLICES
+from pai_core.rl.callbacks import EpisodeStatsCallback
+from pai_core.rl.curriculum import LEVELS, CurriculumCallback
 
 
 # ============================================================================
@@ -64,7 +79,12 @@ class TrainConfig:
     n_envs: int = 4                     # CPU modeste : 4, à baisser si ROS tourne en même temps
 
     # Environnement
-    n_obstacles: tuple[int, int] = (0, 0)   # entraînement de contrôle : aucun obstacle
+    n_obstacles: tuple[int, int] = (0, 0)   # utilisé seulement SANS curriculum
+    curriculum: bool = False                # True : les niveaux de LEVELS remplacent n_obstacles
+
+    # Normalisation de la récompense (VecNormalize)
+    norm_reward: bool = True
+    clip_reward: float = 10.0   # après normalisation : borne les pics (le +30 d'une collision lointaine)
 
     # PPO : valeurs par défaut de Stable-Baselines3, un bon point de départ.
     learning_rate: float = 3e-4   # pas de l'optimiseur Adam : de combien on bouge les poids à chaque pas de gradient
@@ -73,6 +93,9 @@ class TrainConfig:
     n_epochs: int = 10            # passes sur les mêmes 4096 transitions à chaque mise à jour
     gamma: float = 0.99           # actualisation : 0 = agent myope, proche de 1 = agent prévoyant ;
                                   #   horizon effectif 1/(1-γ) = 100 décisions = 10 s (épisode max 30 s)
+                                  #   Jour 11 : c'est AUSSI le γ du façonnage de la récompense (Ng).
+                                  #   Pas de champ séparé : les deux DOIVENT être égaux, un seul
+                                  #   champ rend l'erreur impossible.
     gae_lambda: float = 0.95      # avantage GAE, compromis biais/variance : 0 = un pas (biaisé), 1 = Monte-Carlo (bruité)
     clip_range: float = 0.2       # ε : le rapport π_nouveau/π_ancien est écrêté dans [0,8 ; 1,2]
     ent_coef: float = 0.0         # bonus d'entropie (exploration) ; à augmenter si l'écart-type s'effondre
@@ -104,10 +127,23 @@ def make_env(cfg: TrainConfig, rank: int, eval_env: bool = False):
     Graines : une par rang, sinon les N environnements tireraient les mêmes
     scènes dans le même ordre (N copies des mêmes données). Les graines
     d'évaluation sont dans une plage à part.
+
+    Jour 11 :
+      - la récompense reçoit le γ de PPO (théorème de Ng) ;
+      - avec curriculum, l'environnement d'évaluation est fixé au DERNIER niveau :
+        eval/success_rate mesure toujours la tâche cible, même quand
+        l'entraînement en est encore au niveau 0.
     """
     def _init():
-        env = NavEnv(NavEnvConfig(n_obstacles=cfg.n_obstacles))
-        env = Monitor(env, info_keywords=("is_success",))   # journalise récompense, longueur et succès
+        env = NavEnv(NavEnvConfig(n_obstacles=cfg.n_obstacles,
+                                  reward=RewardConfig(gamma=cfg.gamma)))
+
+        if eval_env and cfg.curriculum:
+            # Avant Monitor : on appelle la méthode sur l'environnement nu.
+            last = LEVELS[-1]
+            env.set_task(last.n_obstacles, last.goal_dist, level=len(LEVELS) - 1)
+
+        env = Monitor(env, info_keywords=("is_success", "collision"))   # journalise récompense, longueur, succès, collision
         offset = 10_000 if eval_env else 0
         env.reset(seed=cfg.seed + offset + rank)
         return env
@@ -115,16 +151,32 @@ def make_env(cfg: TrainConfig, rank: int, eval_env: bool = False):
 
 
 def build_vec_env(cfg: TrainConfig, eval_env: bool = False):
-    """N environnements en parallèle pour l'entraînement, 1 seul pour l'évaluation.
+    """N environnements en parallèle pour l'entraînement, 1 seul pour l'évaluation,
+    enveloppés dans VecNormalize.
 
     SubprocVecEnv : un processus par environnement, utile car la physique
     (50 pas MuJoCo + lidar par décision) coûte cher. DummyVecEnv : tout dans
     un processus, plus simple à déboguer.
-    Pas de VecNormalize : features.py normalise déjà les observations.
+
+    VecNormalize (jour 11) :
+      - norm_obs=False : features.py normalise déjà les observations dans des
+        bornes fixes ; une normalisation glissante les ferait dériver pendant
+        l'entraînement, et il faudrait la recharger à l'inférence.
+      - norm_reward=True : SB3 divise la récompense par l'écart-type glissant
+        du RETOUR actualisé, d'où gamma=cfg.gamma.
+      - évaluation : training=False (les statistiques ne bougent pas) et
+        norm_reward=False (eval/mean_reward reste en unités de la vraie récompense).
+        EvalCallback recopie automatiquement les statistiques d'entraînement vers
+        l'évaluation, à condition que les deux soient des VecNormalize.
     """
     if eval_env:
-        return DummyVecEnv([make_env(cfg, 0, eval_env=True)])
-    return SubprocVecEnv([make_env(cfg, i) for i in range(cfg.n_envs)])
+        venv = DummyVecEnv([make_env(cfg, 0, eval_env=True)])
+        return VecNormalize(venv, training=False, norm_obs=False, norm_reward=False,
+                            gamma=cfg.gamma)
+
+    venv = SubprocVecEnv([make_env(cfg, i) for i in range(cfg.n_envs)])
+    return VecNormalize(venv, norm_obs=False, norm_reward=cfg.norm_reward,
+                        clip_reward=cfg.clip_reward, gamma=cfg.gamma)
 
 
 # ============================================================================
@@ -153,7 +205,8 @@ def build_model(cfg: TrainConfig, env) -> PPO:
 # ============================================================================
 
 def build_callbacks(cfg: TrainConfig, eval_env) -> list:
-    """Sauvegardes régulières et évaluation déterministe sur un environnement à part.
+    """Sauvegardes régulières, évaluation déterministe sur un environnement à part,
+    statistiques d'épisodes et, si demandé, curriculum.
 
     save_freq et eval_freq se comptent en pas du VecEnv : un pas du VecEnv vaut
     n_envs pas d'environnement, d'où la division par cfg.n_envs.
@@ -161,14 +214,18 @@ def build_callbacks(cfg: TrainConfig, eval_env) -> list:
     déploiera dans ROS.
     """
     ckpt = CheckpointCallback(save_freq=max(cfg.checkpoint_every // cfg.n_envs, 1),
-                              save_path=str(cfg.ckpt_dir), name_prefix="ppo")
+                              save_path=str(cfg.ckpt_dir), name_prefix="ppo",
+                              save_vecnormalize=True)   # statistiques écrites à côté des poids
     evaluation = EvalCallback(eval_env,
                               n_eval_episodes=cfg.n_eval_episodes,
                               eval_freq=max(cfg.eval_every // cfg.n_envs, 1),
                               deterministic=True,
                               best_model_save_path=str(cfg.ckpt_dir / "best"),
                               log_path=str(cfg.run_dir / "eval"))
-    return [ckpt, evaluation]
+    callbacks = [ckpt, evaluation, EpisodeStatsCallback()]
+    if cfg.curriculum:
+        callbacks.append(CurriculumCallback())
+    return callbacks
 
 
 # ============================================================================
@@ -205,14 +262,37 @@ def sanity_checks(cfg: TrainConfig) -> None:
     """Quelques secondes de vérification qui évitent un week-end perdu.
 
     Au hasard : le plancher (environ -1). Vers le but : l'objectif (environ +40).
+
+    Jour 11 :
+      - avec curriculum, jouer au niveau 0 PUIS au dernier niveau : sans obstacle,
+        « vers le but » réussit ; au dernier niveau, il doit heurter souvent,
+        preuve que le curriculum a de quoi faire ;
+      - afficher le détail des termes du dernier pas : aucun ne doit écraser
+        les autres d'un ou deux ordres de grandeur.
     """
-    env = NavEnv(NavEnvConfig(n_obstacles=cfg.n_obstacles))
+    env = NavEnv(NavEnvConfig(n_obstacles=cfg.n_obstacles,
+                              reward=RewardConfig(gamma=cfg.gamma)))
     check_env(env)
 
     env.action_space.seed(cfg.seed)           # actions aléatoires reproductibles
     au_hasard = lambda obs: env.action_space.sample()
-    print("au hasard   :", run_episode(env, au_hasard, seed=cfg.seed))
-    print("vers le but :", run_episode(env, vers_le_but, seed=cfg.seed))
+
+    niveaux = [0, len(LEVELS) - 1] if cfg.curriculum else [None]
+    for k in niveaux:
+        if k is not None:
+            lvl = LEVELS[k]
+            env.set_task(lvl.n_obstacles, lvl.goal_dist, level=k)
+            print(f"--- niveau {k} : {lvl.n_obstacles} obstacles, but à {lvl.goal_dist} m")
+        # Quelques épisodes plutôt qu'un seul : au dernier niveau, un épisode
+        # isolé ne dit pas grand-chose.
+        for nom, politique in (("au hasard", au_hasard), ("vers le but", vers_le_but)):
+            fins = [run_episode(env, politique, seed=cfg.seed + i)[2] for i in range(5)]
+            print(f"{nom:12s}:", {r: fins.count(r) for r in sorted(set(fins))})
+
+    # Ordres de grandeur des termes sur un pas de « vers le but »
+    obs, _ = env.reset(seed=cfg.seed)
+    _, _, _, _, info = env.step(vers_le_but(obs))
+    print("termes d'un pas :", {k: round(v, 3) for k, v in info["reward_terms"].items()})
     env.close()
 
 
@@ -227,9 +307,12 @@ def parse_args() -> tuple[TrainConfig, bool]:
     p.add_argument("--steps", type=int, default=TrainConfig.total_timesteps)
     p.add_argument("--n-envs", type=int, default=TrainConfig.n_envs)
     p.add_argument("--skip-checks", action="store_true", help="sauter les vérifications préalables")
+    p.add_argument("--curriculum", action="store_true",
+                   help="difficulté croissante par niveaux (pai_core/rl/curriculum.py)")
     # Plus tard : --resume <chemin.zip> pour reprendre depuis une sauvegarde (utile si WSL s'arrête)
     a = p.parse_args()
-    cfg = TrainConfig(name=a.name, seed=a.seed, total_timesteps=a.steps, n_envs=a.n_envs)
+    cfg = TrainConfig(name=a.name, seed=a.seed, total_timesteps=a.steps, n_envs=a.n_envs,
+                      curriculum=a.curriculum)
     return cfg, a.skip_checks
 
 
@@ -262,6 +345,7 @@ def main() -> None:
         # valent plus que la propreté d'un arrêt.
         cfg.ckpt_dir.mkdir(parents=True, exist_ok=True)
         model.save(cfg.ckpt_dir / "final")
+        env.save(str(cfg.ckpt_dir / "vecnormalize.pkl"))   # ne fait pas partie des poids
         env.close()
         eval_env.close()
 

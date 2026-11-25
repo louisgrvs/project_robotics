@@ -32,8 +32,8 @@ decision_node:
     goal_tolerance: 0.25     # m, comme NavEnv
     base_frame: base_link
     max_duration: 30.0       # s, abandon d'une action (comme max_steps = 300 de NavEnv)
-    decision_mode: dwa       # dwa ou ppo
-    model_path: ""           # pour ppo : chemin du .zip, par ex. ~/project_robotics/checkpoints/controle_sans_obstacle/best/best_model.zip
+    decision_mode: ppo
+    model_path: "~/project_robotics/checkpoints/curriculum_s0/best/best_model.zip"
     velocity_source: ground_truth   # ground_truth (comme NavEnv) ou odom (comme un vrai robot)
     dwa:
       w_heading: 1.0

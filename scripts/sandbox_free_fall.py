@@ -114,13 +114,13 @@ for dt in (2e-3, 1e-3):
     print(f"  écart à la formule d'Euler : {np.max(np.abs(z - euler_theorique)):.2e}")
     print(f"  écart à t = 0,5 s (simulé)  : {(z - exacte)[-1]:+.6e}")
     print(f"  prédiction -g·t·dt/2        : {-g * t[-1] * dt / 2:+.6e}")
-    plt.plot(t, z - exacte, label=f"Euler, Δt = {dt * 1e3:.0f} ms")
+    plt.plot(t, z - exacte, label=f"Euler, Delta t = {dt * 1e3:.0f} ms")
 
 t, z, g = chute(2e-3, mujoco.mjtIntegrator.mjINT_RK4)
 print(f"RK4 : écart max = {np.max(np.abs(z - (z0 - 0.5 * g * t**2))):.2e}")
 
 plt.xlabel("t (s)")
-plt.ylabel("z simulé − z exact (m)")
+plt.ylabel("z simulé - z exact (m)")
 plt.legend()
 plt.savefig("chute_libre_erreur.png", dpi=150)
 plt.show()

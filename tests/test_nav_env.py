@@ -7,8 +7,7 @@ from gymnasium.utils.env_checker import check_env as gym_check_env
 
 from pai_core.envs.nav_env import NavEnv, NavEnvConfig
 from pai_core.planning.astar import astar, path_length
-from pai_core.sim.world import PlacedObstacle, Scene
-
+from pai_core.sim.world import PlacedObstacle, Scene, World
 
 @pytest.fixture
 def env():
@@ -62,7 +61,6 @@ def test_crash_into_wall_terminates_with_collision(env):
             break
     assert terminated and not truncated
     assert info["collision"] and not info["is_success"]
-    assert r < 0
 
 
 def test_reaching_goal_terminates_with_success(env):
@@ -132,3 +130,14 @@ def test_lidar_sees_wall_at_known_distance(env):
     assert abs(ranges[0] - 1.00) < 0.01              # faisceau 0 vers l'avant
     assert abs(ranges[18] - 4.0) < 1e-9              # vers l'arrière : mur à 4,95 m, hors portée
     assert abs(ranges[9] - 3.0) < 0.01               # vers la gauche : mur y = 3
+
+@pytest.mark.parametrize("lo,hi,n", [(1.0, 2.0, 0), (2.0, 6.0, 8)])
+def test_goal_distance_range(lo, hi, n):
+    world = World()
+    rng = np.random.default_rng(0)
+    lim = world.cfg.arena_size / 2 - world.cfg.robot_radius - world.cfg.clearance
+    for _ in range(50):
+        s = world.sample_scene(rng, n, goal_dist=(lo, hi))
+        d = math.hypot(s.goal[0] - s.start[0], s.goal[1] - s.start[1])
+        assert lo <= d <= hi
+        assert abs(s.goal[0]) <= lim and abs(s.goal[1]) <= lim

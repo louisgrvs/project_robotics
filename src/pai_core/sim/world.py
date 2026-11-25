@@ -1,6 +1,6 @@
 """Arène 6 times 6 m, obstacles aléatoires, placement du robot et du but.
 
-Principe : le modèle MuJoCo est compilé UNE fois, avec K obstacles
+Principe : le modèle MuJoCo est compilé une fois, avec K obstacles
 pré-alloués. Ce sont des corps " mocap " : MuJoCo les traite comme fixes
 (la physique ne les déplace jamais) mais on peut changer leur position à
 tout moment en écrivant dans data.mocap_pos, sans recompiler. À chaque
@@ -181,7 +181,14 @@ class World:
         return "0 0 -1"
 
     # ------------------------------------------------------- tirage de scène
-    def sample_scene(self, rng: np.random.Generator, n_obstacles: int) -> Scene:
+    def sample_scene(self, rng: np.random.Generator, n_obstacles: int,
+                     goal_dist: tuple[float, float] | None = None) -> Scene:
+        """Tire une scène valide (départ, but, obstacles, chemin A* existant).
+
+        goal_dist : (d_min, d_max) imposé par le curriculum. Si None, on garde le
+        comportement d'origine : but uniforme dans l'arène, à au moins
+        min_start_goal_dist du départ.
+        """
         cfg = self.cfg
         h = cfg.arena_size / 2
         m = cfg.robot_radius + cfg.clearance
@@ -189,9 +196,10 @@ class World:
 
         for _ in range(cfg.max_tries):
             sx, sy = rng.uniform(-h + m, h - m, 2)
-            gx, gy = rng.uniform(-h + m, h - m, 2)
-            if math.hypot(gx - sx, gy - sy) < cfg.min_start_goal_dist:
+            goal = self._sample_goal(rng, sx, sy, h - m, goal_dist)
+            if goal is None:
                 continue
+            gx, gy = goal
             yaw = rng.uniform(-math.pi, math.pi)
 
             placed = []
@@ -211,6 +219,23 @@ class World:
 
         raise RuntimeError(f"Aucune scène valide en {cfg.max_tries} essais "
                            f"({n} obstacles) : arène trop encombrée ?")
+
+    def _sample_goal(self, rng, sx, sy, lim, goal_dist, tries=20):
+        """Renvoie (gx, gy) dans le carré [-lim, lim]², ou None en cas d'échec."""
+        if goal_dist is None:                       # comportement d'origine
+            gx, gy = rng.uniform(-lim, lim, 2)
+            if math.hypot(gx - sx, gy - sy) < self.cfg.min_start_goal_dist:
+                return None
+            return float(gx), float(gy)
+
+        lo, hi = goal_dist
+        for _ in range(tries):
+            r = rng.uniform(lo, hi)                 # distance uniforme dans [lo, hi]
+            a = rng.uniform(-math.pi, math.pi)      # direction quelconque
+            gx, gy = sx + r * math.cos(a), sy + r * math.sin(a)
+            if abs(gx) <= lim and abs(gy) <= lim:   # le but doit rester dans l'arène
+                return gx, gy
+        return None
 
     def _place_obstacle(self, rng, k, start, goal, tries=50) -> PlacedObstacle | None:
         cfg = self.cfg
